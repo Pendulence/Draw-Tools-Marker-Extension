@@ -2842,6 +2842,8 @@ L.EditToolbar.Delete = L.Handler.extend({
 
 		L.Handler.prototype.enable.call(this);
 
+        deleting = true;
+
 		this._deletableLayers
 			.on('layeradd', this._enableLayerDelete, this)
 			.on('layerremove', this._disableLayerDelete, this);
@@ -2852,6 +2854,8 @@ L.EditToolbar.Delete = L.Handler.extend({
 
 	disable: function () {
 		if (!this._enabled) { return; }
+
+        deleting = false;
 
 		L.Handler.prototype.disable.call(this);
 
