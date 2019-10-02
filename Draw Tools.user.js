@@ -5172,7 +5172,7 @@ window.plugin.drawTools.save = function() {
       item.title = layer.title;
       item.submission = layer.submission;
       item.reviewerinfo = layer.reviewerinfo;
-      console.log("hello " + layer.title + layer.options.title);
+      //console.log("hello " + layer.title + layer.options.title);
 
 //       $.each(markerData, function(index,itm) {
 //           if(layer.getLatLng().equals(itm.latLng,0.0002))
@@ -5269,7 +5269,7 @@ function _onMarkerClick(data)
         var tempcolor = item.options.icon.options.color;
 
 		const content = `<div>
-            <fieldset><legend>Marker Color</legend>
+            <fieldset><legend>Title</legend>
 			<input type="color" name="drawColor" id="drawtools_color"></input><br>
 			</fieldset>
 			<p>Portal Information</p>
@@ -5324,7 +5324,7 @@ function _onMarkerClick(data)
                        ],
               change: function(color) { tempcolor = color.toHexString(); },
               //    move: function(color) { window.plugin.drawTools.setDrawColor(color.toHexString()); },
-              color: item.options.icon.options.color,
+              color: tempcolor,
           });
 
 		// Remove ok button
