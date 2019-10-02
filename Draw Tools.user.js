@@ -1,10 +1,11 @@
 // ==UserScript==
+// @author         jonatkins, Eccenux
 // @id             iitc-plugin-draw-tools-mobile@eccenux
 // @name           IITC plugin: draw tools mobile
 // @category       Layer
 // @namespace      https://github.com/jonatkins/ingress-intel-total-conversion
-// @version        0.2.1
-// @description    [0.2.1] Allow drawing things onto the current map so you may plan your next move. Mobile device optimization.
+// @version        0.2.4
+// @description    [0.2.4] Allow drawing things onto the current map so you may plan your next move. Mobile device optimization.
 // @include        https://*.ingress.com/intel*
 // @include        http://*.ingress.com/intel*
 // @match          https://*.ingress.com/intel*
@@ -13,7 +14,11 @@
 // @include        http://*.ingress.com/mission/*
 // @match          https://*.ingress.com/mission/*
 // @match          http://*.ingress.com/mission/*
+// @include        https://intel.ingress.com/*
+// @match          https://intel.ingress.com/*
 // @grant          none
+// @updateURL      https://github.com/Eccenux/iitc-plugin-draw-tools-mobile/raw/master/draw-tools-mobile.meta.js
+// @downloadURL    https://github.com/Eccenux/iitc-plugin-draw-tools-mobile/raw/master/draw-tools-mobile.user.js
 // ==/UserScript==
 
 
@@ -49,8 +54,14 @@ L.drawLocal = {
 	draw: {
 		toolbar: {
 			actions: {
-				title: 'Cancel drawing',
-				text: 'Cancel'
+				undo: {
+					title: 'Undo last',
+					text: 'Undo'
+				},
+				cancel: {
+					title: 'Cancel drawing',
+					text: 'Cancel'
+				},
 			},
 			buttons: {
 				polyline: 'Draw a polyline',
@@ -73,17 +84,18 @@ L.drawLocal = {
 			},
 			polygon: {
 				tooltip: {
-					start: 'Click to start drawing shape.',
-					cont: 'Click to continue drawing shape.',
-					end: 'Click first point to close this shape.'
+					start: 'Tap to start drawing shape.',
+					cont: 'Tap to continue drawing shape.',
+					end: 'Tap tip to close this shape.'
 				}
 			},
 			polyline: {
+				totalDistance: 'total',
 				error: '<strong>Error:</strong> shape edges cannot cross!',
 				tooltip: {
-					start: 'Click to start drawing line.',
-					cont: 'Click to continue drawing line.',
-					end: 'Click last point to finish line.'
+					start: 'Tap to start drawing line.',
+					cont: 'Tap to continue drawing line.',
+					end: 'Tap tip to finish line.'
 				}
 			},
 			rectangle: {
@@ -264,6 +276,9 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 			this._poly = new L.GeodesicPolyline([], this.options.shapeOptions);
 
 			this._tooltip.updateContent(this._getTooltipText());
+			this._tooltip._container.addEventListener('click', () => {
+				this._finishShape();
+			});
 
 			/**/
 			// remove previous listener (shouldn't really happen)
@@ -281,7 +296,7 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 					if (e.target.nodeName == 'svg'
 					|| $(event.target).parents('svg').length > 0) {
 						me._onClick(e);
-					}
+					}			
 				};
 				me._map._container.addEventListener('click', me._clickListener, true);
 			//}, 200);
@@ -375,14 +390,47 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 		//setTimeout(()=>{
 			this._updateFinishHandler();
 		//}, 1000);
-
+		
 		this._vertexAdded(latlng);
+		this._updateTooltip(latlng);
 
 		this._clearGuides();
+	},
 
-		// cannot update tooltip because we don't track current position...
-		// ...and also do those tooltips really make sense on mobile?
-		//this._updateTooltip();
+	undo: function () {
+		var markerCount = this._markers.length;
+		if (markerCount < 1) {
+			return;
+		}
+		//console.log('undo poly', {this:this, markers: this._markers, poly: this._poly})
+
+		//this._markers.push(this._createMarker(latlng));
+		var marker = this._markers.pop();
+		this._markerGroup.removeLayer(marker);
+
+		//this._poly.addLatLng(latlng);
+		var markerIndex = markerCount - 1;
+		this._map.removeLayer(this._poly);
+		this._poly.spliceLatLngs(markerIndex, 1);
+		if (this._poly.getLatLngs().length >= 2) {
+			this._map.addLayer(this._poly);
+		}
+
+		//setTimeout(()=>{
+			this._updateFinishHandler();
+		//}, 1000);
+
+		// update tooltip data
+		this._vertexRemoved();
+		if (this._markers.length > 0) {
+			// reset tooltip to last exisiting marker
+			var latlng = this._markers[this._markers.length - 1].getLatLng();
+			this._updateTooltip(latlng);
+		} else {
+			this._updateTooltip();
+		}
+
+		this._clearGuides();
 	},
 
 	_updateFinishHandler: function () {
@@ -515,14 +563,27 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 	},
 
 	_getMeasurementString: function () {
-		var currentLatLng = this._currentLatLng,
-			previousLatLng = this._markers[this._markers.length - 1].getLatLng(),
-			distance;
+		// skip if only marker is positioned
+		if (this._markers.length < 2) {
+			return "";
+		}
 
-		// calculate the distance from the last fixed point to the mouse position
-		distance = this._measurementRunningTotal + currentLatLng.distanceTo(previousLatLng);
+		// calculate distances
+		var currentDistance = this._measurementRunningTotals[this._measurementRunningTotals.length - 1];
+		var totalDistance = this._measurementRunningTotal;
+		var readableDistances = {
+			current: L.GeometryUtil.readableDistance(currentDistance, this.options.metric),
+			total: L.GeometryUtil.readableDistance(totalDistance, this.options.metric),
+		};
 
-		return L.GeometryUtil.readableDistance(distance, this.options.metric);
+		//console.log(readableDistances);
+		
+		// only current
+		if (currentDistance == totalDistance) {
+			return readableDistances.current;
+		}
+
+		return `${readableDistances.current} (${L.drawLocal.draw.handlers.polyline.totalDistance}: ${readableDistances.total})`;
 	},
 
 	_showErrorTooltip: function () {
@@ -564,13 +625,41 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 		}
 	},
 
+	// this is used for distance calculations (for tooltip)
 	_vertexAdded: function (latlng) {
 		if (this._markers.length === 1) {
 			this._measurementRunningTotal = 0;
+			this._measurementRunningTotals = [];
 		}
 		else {
-			this._measurementRunningTotal +=
-				latlng.distanceTo(this._markers[this._markers.length - 2].getLatLng());
+			var newSegment = latlng.distanceTo(this._markers[this._markers.length - 2].getLatLng());
+			this._measurementRunningTotal += newSegment;
+			this._measurementRunningTotals.push(newSegment);
+		}
+	},
+	// reset/correct total distance
+	_vertexRemoved: function (marker) {
+		if (!(this._measurementRunningTotals instanceof Array)) {
+			return;
+		}
+		if (this._markers.length > 1) {
+			var removedDistance = this._measurementRunningTotals.pop();
+			this._measurementRunningTotal -= removedDistance;
+			//console.log('[_vertexRemoved] pop', removedDistance);
+			/**
+			var totalDebug = this._measurementRunningTotals.reduce((prev, curr)=>prev+curr);
+			var rounded = {
+				expected : Math.round(totalDebug * 1000) / 1000,
+				actual : Math.round(this._measurementRunningTotal * 1000) / 1000,
+			};
+			if (rounded.expected != rounded.expected) {
+				console.warn('[_vertexRemoved] wrong total: ', rounded);
+			}
+			/**/
+		} else {
+			//console.log('[_vertexRemoved] reset');
+			this._measurementRunningTotals = [];
+			this._measurementRunningTotal = 0;
 		}
 	},
 
@@ -652,7 +741,8 @@ L.Draw.Polygon = L.Draw.Polyline.extend({
 	},
 
 	_getMeasurementString: function () {
-		var area = this._area;
+		var latLngs = this._poly.getLatLngs();
+		var area = L.GeometryUtil.geodesicArea(latLngs);
 
 		if (!area) {
 			return null;
@@ -705,11 +795,11 @@ L.Draw.SimpleShape = L.Draw.Feature.extend({
 
 	/**
 	 * Map touch events to mouse events.
-	 *
+	 * 
 	 * Function originaly developed by Mickey Shine.
-	 * https://stackoverflow.com/questions/1517924/javascript-mapping-touch-events-to-mouse-events
-	 *
-	 * @param {TouchEvent} event
+	 * https://stackoverflow.com/questions/1517924/javascript-mapping-touch-events-to-mouse-events 
+	 * 
+	 * @param {TouchEvent} event 
 	 */
 	_touchMapping: function(event)
 	{
@@ -720,14 +810,14 @@ L.Draw.SimpleShape = L.Draw.Feature.extend({
 		{
 			case "touchstart": type = "mousedown"; break;
 			case "touchmove":  type = "mousemove"; break;
-			case "touchend":   type = "mouseup";   break;
+			case "touchend":   type = "mouseup";   break;        
 			default:           return;
 		}
 
 		var simulatedEvent = document.createEvent("MouseEvent");
-		simulatedEvent.initMouseEvent(type, true, true, window, 1,
-									first.screenX, first.screenY,
-									first.clientX, first.clientY, false,
+		simulatedEvent.initMouseEvent(type, true, true, window, 1, 
+									first.screenX, first.screenY, 
+									first.clientX, first.clientY, false, 
 									false, false, false, 0/*left*/, null);
 		first.target.dispatchEvent(simulatedEvent);
 		// prevent drag
@@ -746,7 +836,7 @@ L.Draw.SimpleShape = L.Draw.Feature.extend({
 			this._map
 				.on('mousedown', this._onMouseDown, this)
 				.on('mousemove', this._onMouseMove, this);
-
+			
 			// enable touch mapping
 			this._container.addEventListener('touchstart', this._touchMapping);
 			this._container.addEventListener('touchmove', this._touchMapping);
@@ -764,7 +854,7 @@ L.Draw.SimpleShape = L.Draw.Feature.extend({
 			this._map
 				.off('mousedown', this._onMouseDown, this)
 				.off('mousemove', this._onMouseMove, this);
-
+			
 			// disable touch mapping
 			this._container.removeEventListener('touchstart', this._touchMapping);
 			this._container.removeEventListener('touchmove', this._touchMapping);
@@ -927,8 +1017,7 @@ L.Draw.Marker = L.Draw.Feature.extend({
 	options: {
 		icon: new L.Icon.Default(),
 		repeatMode: false,
-		zIndexOffset: 2000, // This should be > than the highest z-index any markers
-        interactive: true
+		zIndexOffset: 2000 // This should be > than the highest z-index any markers
 	},
 
 	initialize: function (map, options) {
@@ -945,6 +1034,9 @@ L.Draw.Marker = L.Draw.Feature.extend({
 
 		if (this._map) {
 			this._tooltip.updateContent({ text: L.drawLocal.draw.handlers.marker.tooltip.start });
+
+			// keep references for undo (should only remove features added in current session)
+			this._markersAdded = [];
 
 			// same as for polyline
 			/**/
@@ -963,17 +1055,20 @@ L.Draw.Marker = L.Draw.Feature.extend({
 					if (e.target.nodeName == 'svg'
 					|| $(event.target).parents('svg').length > 0) {
 						me._onClick(e);
-					}
+					}			
 				};
 				me._map._container.addEventListener('click', me._clickListener, true);
 			//}, 200);
 			/**/
 		}
-	},
+	},	
 
 	removeHooks: function () {
 		//console.log('[Draw.Marker]', 'removeHooks', arguments);
 		L.Draw.Feature.prototype.removeHooks.call(this);
+
+		// remove references (note, just removing references; markers should be kept on the map)
+		this._markersAdded = [];
 
 		if (this._map) {
 			if (this._clickListener && this._map && this._map._container instanceof Element) {
@@ -985,9 +1080,9 @@ L.Draw.Marker = L.Draw.Feature.extend({
 
 	_onClick: function (e) {
 		var latlng = this._map.mouseEventToLatLng(e);
-		console.warn('[Draw.Marker]', '_onClick', latlng);
+		//console.log('[Draw.Marker]', '_onClick', latlng);
 		// ignore same LL
-		if (this._previousLL
+		if (this._previousLL 
 			&& this._previousLL.lat == latlng.lat
 			&& this._previousLL.lng == latlng.lng) {
 			return;
@@ -1002,35 +1097,59 @@ L.Draw.Marker = L.Draw.Feature.extend({
 			zIndexOffset: this.options.zIndexOffset
 		});
 		this._map.addLayer(this._marker);
+		// keep reference
+		this._markersAdded.push(this._marker);
 		/**/
 
+        // add event listener
         this._marker.addEventListener('click', _onMarkerClick, true);
-        var item = {};
-        item.type = 'marker';
-        item.latLng = this._marker.getLatLng();
-        item.color = this._marker.options.icon.options.color;
-        item.title = "ultimate test";
-        item.submission = "5";
-        item.reviewerinfo = "6";
-        markerData[markerData.length] = item;
+        console.log('[Draw.Marker]', '_eventlisteneradded', latlng);
+
+
+        this._marker.type = 'marker';
+        this._marker.title = "";
+        this._marker.submission = "";
+        this._marker.reviewerinfo = "";
+
 
 		if (this.options.snapPoint) this._marker.setLatLng(this.options.snapPoint(this._marker.getLatLng()));
 
 		this._fireCreatedEvent();
 
-		// disable & enable adding next marker
-		this.disable();
-		if (this.options.repeatMode) {
-			this.enable();
+		// disable handler to stop adding markers
+		if (!this.options.repeatMode) {
+			//this.enable();
+			this.disable();
 		}
+	},
+
+	/**
+	 * Undo last marker.
+	 * 
+	 * Note! This is meant to only affect markers added in current session
+	 * (session ends with cancel).
+	 */
+	undo: function() {
+		if (this._markersAdded.length < 1) {
+			console.log('no more markers for this session');
+			return;
+		}
+		var marker = this._markersAdded.pop();
+		// remove from map
+		this._map.removeLayer(marker);
+		// remove from drawtools internals
+		window.plugin.drawTools.drawnItems.removeLayer(marker);
+		// this is used in edit tools
+		// (don't seem to do anything internally, but might be used by other plugins) 
+		this._map.fire('draw:deleted', { layers: [marker] });
+		//delete marker;
 	},
 
 	_fireCreatedEvent: function () {
 		//console.log('[Draw.Marker]', '_fireCreatedEvent');
 		L.Draw.Feature.prototype._fireCreatedEvent.call(this, this._marker);
 	}
-},
-);
+});
 
 L.Edit = L.Edit || {};
 
@@ -1158,8 +1277,6 @@ L.Edit.Poly = L.Handler.extend({
 	},
 
 	_onMarkerClick: function (e) {
-
-        console.warn('[Draw.Marker]', '_onMarkerClick', e);
 		// we want to remove the marker on click, but if latlng count < 3, polyline would be invalid
 		if (this._poly.getLatLngs().length < 3) { return; }
 
@@ -1243,7 +1360,6 @@ L.Edit.Poly = L.Handler.extend({
 		};
 
 		onClick = function () {
-            console.warn('[Draw.Marker]', 'onclick');
 			onDragStart.call(this);
 			onDragEnd.call(this);
 			this._fireEdit();
@@ -1488,7 +1604,6 @@ L.Edit.Rectangle = L.Edit.SimpleShape.extend({
 			center = bounds.getCenter();
 
 			marker.setLatLng(center);
-
 		}
 
 		this._toggleCornerMarkers(1);
@@ -1690,7 +1805,9 @@ L.GeometryUtil = {
 		var areaStr;
 
 		if (isMetric) {
-			if (area >= 10000) {
+			if (area >= 100000) {
+				areaStr = (area * 0.000001).toFixed(2) + ' km&sup2;';
+			} else if (area >= 1000) {
 				areaStr = (area * 0.0001).toFixed(2) + ' ha';
 			} else {
 				areaStr = area.toFixed(2) + ' m&sup2;';
@@ -2118,9 +2235,10 @@ L.Toolbar = L.Class.extend({
 	},
 
 	_showActionsToolbar: function () {
+		var button = document.querySelector('.leaflet-touch .leaflet-bar a');	// any button, just for calculations
 		var buttonIndex = this._activeMode.buttonIndex,
 			lastButtonIndex = this._lastButtonIndex,
-			buttonHeight = 26, // TODO: this should be calculated
+			buttonHeight = button ? button.clientHeight : 26, 
 			borderHeight = 1, // TODO: this should also be calculated
 			toolbarPosition = (buttonIndex * buttonHeight) + (buttonIndex * borderHeight) - 1;
 
@@ -2224,6 +2342,18 @@ L.DrawToolbar = L.Toolbar.extend({
 		}
 
 		L.Toolbar.prototype.initialize.call(this, options);
+
+		// handle undo action show/hide (upon action activation)
+		this.on('enable', function(e) {
+			//console.log('enable: ', e, this._activeMode.handler);
+			var undoAction = this._actionsContainer.querySelector('li');
+			// check if the handler supports undo
+			if (this._activeMode.handler.undo) {
+				undoAction.style.display = '';
+			} else {
+				undoAction.style.display = 'none';
+			}
+		})
 	},
 
 	addToolbar: function (map) {
@@ -2290,11 +2420,17 @@ L.DrawToolbar = L.Toolbar.extend({
 		// Create the actions part of the toolbar
 		this._actionsContainer = this._createActions([
 			{
-				title: L.drawLocal.draw.toolbar.actions.title,
-				text: L.drawLocal.draw.toolbar.actions.text,
+				title: L.drawLocal.draw.toolbar.actions.undo.title,
+				text: L.drawLocal.draw.toolbar.actions.undo.text,
+				callback: this.undo,
+				context: this
+			},
+			{
+				title: L.drawLocal.draw.toolbar.actions.cancel.title,
+				text: L.drawLocal.draw.toolbar.actions.cancel.text,
 				callback: this.disable,
 				context: this
-			}
+			},
 		]);
 
 		// Add draw and cancel containers to the control container
@@ -2302,6 +2438,13 @@ L.DrawToolbar = L.Toolbar.extend({
 		container.appendChild(this._actionsContainer);
 
 		return container;
+	},
+
+	undo: function () {
+		if (this._activeMode.handler.undo) {
+			console.log('undo', this, this._activeMode.handler);
+			this._activeMode.handler.undo();
+		}
 	},
 
 	setOptions: function (options) {
@@ -2560,8 +2703,6 @@ L.EditToolbar.Edit = L.Handler.extend({
 				layer.setLatLngs(this._uneditedLayerProps[id].latlngs);
 			} else { // Marker
 				layer.setLatLng(this._uneditedLayerProps[id].latlng);
-                //console.log("revert" + id + layer + this._uneditedLayerProps[id].latlng);
-                //layer.removeEventListener('click', _onMarkerClick);
 			}
 		}
 	},
@@ -2664,37 +2805,13 @@ L.EditToolbar.Edit = L.Handler.extend({
 
 	_onMarkerDragEnd: function (e) {
 		var layer = e.target;
-        var id = L.Util.stamp(layer);
 		layer.edited = true;
-
-        layer.addEventListener('click', _onMarkerClick, true);
-        //console.log("marker moved?");
-        //console.log("revert" + id);//+ layer + this._uneditedLayerProps[id].latlng);
-
-        $.each(markerData, function(index,item) {
-        if(layer.getLatLng().equals(item.latLng,0.0002)){
-              //item.index = L.Util.stamp(id);
-              //markerData[index].index = item.index;
-              markerData[index].title = item.title;
-              markerData[index].submission = item.submission;
-              markerData[index].reviewerinfo = item.reviewerinfo;
-              window.plugin.drawTools.save();
-          }
-        })
 	},
-
-
 
 	_onMouseMove: function (e) {
 		this._tooltip.updatePosition(e.latlng);
-    }
+	}
 });
-
-/* function _test (e)
-{
-   console.log("got here");
-
-} */
 
 
 L.EditToolbar.Delete = L.Handler.extend({
@@ -2731,8 +2848,6 @@ L.EditToolbar.Delete = L.Handler.extend({
 
 		this.fire('enabled', { handler: this.type});
 		this._map.fire('draw:editstart', { handler: this.type });
-
-        deleting = true;
 	},
 
 	disable: function () {
@@ -2746,8 +2861,6 @@ L.EditToolbar.Delete = L.Handler.extend({
 
 		this.fire('disabled', { handler: this.type});
 		this._map.fire('draw:editstop', { handler: this.type });
-
-        deleting = false;
 	},
 
 	addHooks: function () {
@@ -4933,7 +5046,7 @@ window.plugin.drawTools.addDrawControl = function() {
 	  circle: {
 		title: 'Add a circle.\n\n'
 		  + 'Click on the button, then click-AND-HOLD on the\n'
-		  + 'map where the circle’s center should be. Move\n'
+		  + 'map where the circleâ€™s center should be. Move\n'
 		  + 'the mouse to control the radius. Release the mouse\n'
 		  + 'to finish.',
 		shapeOptions: window.plugin.drawTools.polygonOptions,
@@ -5014,7 +5127,7 @@ window.plugin.drawTools.setAccessKeys = function() {
 
 
 // given a point it tries to find the most suitable portal to
-// snap to. It takes the CircleMarker’s radius and weight into account.
+// snap to. It takes the CircleMarkerâ€™s radius and weight into account.
 // Will return null if nothing to snap to or a LatLng instance.
 window.plugin.drawTools.getSnapLatLng = function(unsnappedLatLng) {
   var containerPoint = map.latLngToContainerPoint(unsnappedLatLng);
@@ -5056,19 +5169,23 @@ window.plugin.drawTools.save = function() {
 	  item.type = 'marker';
 	  item.latLng = layer.getLatLng();
 	  item.color = layer.options.icon.options.color;
+      item.title = layer.title;
+      item.submission = layer.submission;
+      item.reviewerinfo = layer.reviewerinfo;
+      console.log("hello " + layer.title + layer.options.title);
 
-       $.each(markerData, function(index,itm) {
-          if(layer.getLatLng().equals(itm.latLng,0.0002))
-          {
-              var markeritem = itm;
-              item.index = L.Util.stamp(layer);
-              //console.log(item.index);
-              item.title = itm.title;
-              item.submission = itm.submission;
-              item.reviewerinfo = itm.reviewerinfo;
-          }
-       });
-
+//       $.each(markerData, function(index,itm) {
+//           if(layer.getLatLng().equals(itm.latLng,0.0002))
+//           {
+//               var markeritem = itm;
+//               item.index = L.Util.stamp(layer);
+//               //console.log(item.index);
+//               item.title = itm.title;
+//               item.submission = itm.submission;
+//               item.reviewerinfo = itm.reviewerinfo;
+//               item.color = itm.color;
+//           }
+//        });
 	} else {
 	  console.warn('Unknown layer type when saving draw tools layer');
 	  return; //.eachLayer 'continue'
@@ -5084,8 +5201,6 @@ window.plugin.drawTools.save = function() {
 
 window.plugin.drawTools.load = function() {
   try {
-    markerData = {};
-    //localStorage['plugin-draw-tools-layer'] = null;
 	var dataStr = localStorage['plugin-draw-tools-layer'];
 	if (dataStr === undefined) return;
 
@@ -5096,8 +5211,6 @@ window.plugin.drawTools.load = function() {
 	console.warn('draw-tools: failed to load data from localStorage: '+e);
   }
 }
-
-var markerData = {};
 
 window.plugin.drawTools.import = function(data) {
   $.each(data, function(index,item) {
@@ -5113,14 +5226,16 @@ window.plugin.drawTools.import = function(data) {
 		layer = L.geodesicPolygon(item.latLngs, L.extend({},window.plugin.drawTools.polygonOptions,extraOpt));
 		break;
 	  case 'circle':
-		layer = L.geodesicCircle(item.latLng, portal.options.radius, L.extend({},window.plugin.drawTools.polygonOptions,extraOpt));
+		layer = L.geodesicCircle(item.latLng, item.radius, L.extend({},window.plugin.drawTools.polygonOptions,extraOpt));
 		break;
 	  case 'marker':
 		var extraMarkerOpt = {};
 		if (item.color) extraMarkerOpt.icon = window.plugin.drawTools.getMarkerIcon(item.color);
 		layer = L.marker(item.latLng, L.extend({},window.plugin.drawTools.markerOptions,extraMarkerOpt));
-        markerData[index] = item;
-        //console.warn('created '+ item.latLng + item.index);
+        layer.title = item.title;
+        layer.submission = item.submission;
+        layer.reviewerinfo = item.reviewerinfo;
+        layer.color = item.color;
         layer.addEventListener('click', _onMarkerClick, true);
 		window.registerMarkerForOMS(layer);
 		break;
@@ -5137,47 +5252,26 @@ window.plugin.drawTools.import = function(data) {
 
 }
 
+var markerData = {};
 var deleting = false;
 
 function _onMarkerClick(data)
 {
-    var markeritem = {};
-     $.each(markerData, function(index,item) {
-         console.warn(item.index + item.latLng);
-         if(data.target.getLatLng().equals(item.latLng,0.0002))
-         {
-             var markeritem = item;
-             if(!deleting)
-             {
-                 console.log(L.Util.stamp(data.target));
-                 item.index = L.Util.stamp(data.target);
-                 saveDialog(markeritem, index);
-                 return;
-             }
-
-         }
-         else if(item.index == L.Util.stamp(data.target)){
-             var markeritem2 = item;
-             if(!deleting)
-             {
-                 console.log(item.index);
-                 item.index = L.Util.stamp(data.target);
-                 item.latLng = data.target.getLatLng();
-                 saveDialog(markeritem2, index);
-                 return;
-             }
-         }
-     });
-
+    var markeritem = data.target;
+    if(!deleting)
+    {
+        saveDialog(markeritem, 0);
+    }
 }
 
-// var saveDialogOpened = false;
-
 	function saveDialog(item, index) {
-//         if(!saveDialogOpened)
-//         {
-//             saveDialogOpened= true;
+
+        var tempcolor = item.options.icon.options.color;
+
 		const content = `<div>
+            <fieldset><legend>Marker Color</legend>
+			<input type="color" name="drawColor" id="drawtools_color"></input><br>
+			</fieldset>
 			<p>Portal Information</p>
 			<fieldset><legend>Title</legend>
 			<input type='inputfield' name='PogoSaveTitle' value='{{title}}' id='PogoSaveTitle'><label for='PogoSaveTitle'><br>
@@ -5202,9 +5296,12 @@ function _onMarkerClick(data)
 					const PogoSaveSubmission = document.querySelector('input[name="PogoSaveSubmission"]').value;
                     const PogoSaveReviewerinfo = document.querySelector('input[name="PogoSaveReviewerinfo"]').value;
 
-                    markerData[index].title = PogoSaveTitle;
-                    markerData[index].submission = PogoSaveSubmission;
-                    markerData[index].reviewerinfo = PogoSaveReviewerinfo;
+                    item.title = PogoSaveTitle;
+                    item.submission = PogoSaveSubmission;
+                    item.reviewerinfo = PogoSaveReviewerinfo;
+                    item.color = tempcolor;
+                    item.options.icon.options.color = tempcolor;
+
 
                     window.plugin.drawTools.save();
  					container.dialog('close');
@@ -5213,6 +5310,22 @@ function _onMarkerClick(data)
 			}
 
 		});
+
+          $('#drawtools_color').spectrum({
+              flat: false,
+              showInput: false,
+              showButtons: false,
+              showPalette: true,
+              showPaletteOnly: false,
+              showSelectionPalette: false,
+              palette: [ ['#a24ac3','#514ac3','#4aa8c3','#51c34a'],
+                        ['#c1c34a','#c38a4a','#c34a4a','#c34a6f'],
+                        ['#000000','#666666','#bbbbbb','#ffffff']
+                       ],
+              change: function(color) { tempcolor = color.toHexString(); },
+              //    move: function(color) { window.plugin.drawTools.setDrawColor(color.toHexString()); },
+              color: item.options.icon.options.color,
+          });
 
 		// Remove ok button
 		const outer = container.parent();
