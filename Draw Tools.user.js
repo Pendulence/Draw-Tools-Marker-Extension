@@ -1110,6 +1110,7 @@ L.Draw.Marker = L.Draw.Feature.extend({
         this._marker.title = "";
         this._marker.submission = "";
         this._marker.reviewerinfo = "";
+        this._marker.color = window.plugin.drawTools.currentColor;
 
 
 		if (this.options.snapPoint) this._marker.setLatLng(this.options.snapPoint(this._marker.getLatLng()));
@@ -5270,10 +5271,10 @@ function _onMarkerClick(data)
 
 	function saveDialog(item, index) {
 
-        var tempcolor = item.options.icon.options.color;
+        var tempcolor = item.color;// item.options.icon.options.color;
 
 		const content = `<div>
-            <fieldset><legend>Title</legend>
+            <fieldset><legend>Marker Color</legend>
 			<input type="color" name="drawColor" id="drawtools_color"></input><br>
 			</fieldset>
 			<p>Portal Information</p>
@@ -5304,7 +5305,10 @@ function _onMarkerClick(data)
                     item.submission = PogoSaveSubmission;
                     item.reviewerinfo = PogoSaveReviewerinfo;
                     item.color = tempcolor;
-                    item.options.icon.options.color = tempcolor;
+                    //item.options.icon.options.color = tempcolor;
+                    item.setIcon(window.plugin.drawTools.getMarkerIcon(item.color));
+
+                    //console.log(item.color + item.options.icon.options.color);
 
 
                     window.plugin.drawTools.save();
