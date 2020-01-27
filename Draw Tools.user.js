@@ -5287,10 +5287,13 @@ function _onMarkerClick(data)
             <fieldset><legend>Reviewer Information</legend>
 			<input type='inputfield' name='PogoSaveReviewerinfo' value='{{reviewinfo}}' id='PogoSaveReviewerinfo'><label for='PogoSaveReviewerinfo'><br>
 			</fieldset>
+            <fieldset><legend><p>Streetview</p></legend>
+            {{location}}
+            </fieldset>
 			</div>`;
 
         const html =
-			content.replace('{{title}}', item.title).replace('{{submission}}', item.submission).replace('{{reviewinfo}}', item.reviewerinfo);
+			content.replace('{{title}}', item.title).replace('{{submission}}', item.submission).replace('{{reviewinfo}}', item.reviewerinfo).replace('{{location}}', '<a href="http://maps.google.com/maps?q=&layer=c&cbll=' + item.getLatLng().lat + "," + item.getLatLng().lng + '" target="_blank">Google Maps Streetview</a>');
 
 		const container = dialog({
 			html: html,
